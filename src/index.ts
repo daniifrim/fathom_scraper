@@ -28,14 +28,13 @@ console.log('Launching browser...');
 
     // Launch the browser with enhanced anti-detection settings
     const browser = await chromium.launch({ 
-      headless: false,
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-site-isolation-trials',
-        '--window-size=1280,720'
+        '--disable-site-isolation-trials'
       ]
     });
     

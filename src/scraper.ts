@@ -2,6 +2,7 @@ import { Page } from 'playwright';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
+import { insertMeeting, getMeetingByUrl, MeetingRecord } from './database';
 
 interface VideoMetadata {
   title: string;
@@ -81,32 +82,51 @@ async function getVideoMetadata(thumbnailElement: any): Promise<VideoMetadata> {
 }
 
 export async function saveTranscript(data: TranscriptData): Promise<string> {
-  // Create transcripts directory if it doesn't exist
-  const transcriptsDir = path.join(process.cwd(), 'transcripts');
-  await fs.mkdir(transcriptsDir, { recursive: true });
+  try {
+    // First save to database
+    const meetingRecord: MeetingRecord = {
+      title: data.metadata.title,
+      date: data.metadata.date,
+      duration: data.metadata.duration,
+      url: data.metadata.url,
+      thumbnail_url: data.metadata.thumbnailUrl,
+      summary: data.summary,
+      transcript: data.transcript
+    };
 
-  // Create a filename from the title and date
-  const safeTitle = data.metadata.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-  const safeDate = data.metadata.date.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-  const filename = `${safeTitle}_${safeDate}.txt`;
-  const filepath = path.join(transcriptsDir, filename);
+    // Check if meeting already exists
+    const existingMeeting = await getMeetingByUrl(data.metadata.url);
+    if (existingMeeting) {
+      console.log('Meeting already exists in database, skipping save');
+      return '';
+    }
 
-  // Process summary to remove extra line breaks
-  const processedSummary = data.summary
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .join('\n');
+    // Save to database
+    await insertMeeting(meetingRecord);
+    console.log('Saved meeting to database');
 
-  // Process transcript to remove extra line breaks
-  const processedTranscript = data.transcript
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .join('\n');
+    // Then save to file system as backup
+    const transcriptsDir = path.join(process.cwd(), 'transcripts');
+    await fs.mkdir(transcriptsDir, { recursive: true });
 
-  // Create the content with proper line breaks and clear section separation
-  const content = `=== Meeting Information ===
+    const safeTitle = data.metadata.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeDate = data.metadata.date.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const filename = `${safeTitle}_${safeDate}.txt`;
+    const filepath = path.join(transcriptsDir, filename);
+
+    const processedSummary = data.summary
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
+
+    const processedTranscript = data.transcript
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
+
+    const content = `=== Meeting Information ===
 Title: ${data.metadata.title}
 Date: ${data.metadata.date}
 Duration: ${data.metadata.duration}
@@ -120,14 +140,16 @@ ${processedSummary}
 === Transcript ===
 ${processedTranscript}`;
 
-  // Save to file with explicit encoding
-  await fs.writeFile(filepath, content, { encoding: 'utf8' });
-  
-  // Verify the file was written
-  const stats = await fs.stat(filepath);
-  console.log(`Transcript file size: ${stats.size} bytes`);
-  
-  return filepath;
+    await fs.writeFile(filepath, content, { encoding: 'utf8' });
+    
+    const stats = await fs.stat(filepath);
+    console.log(`Transcript file size: ${stats.size} bytes`);
+    
+    return filepath;
+  } catch (error) {
+    console.error('Error saving transcript:', error);
+    throw error;
+  }
 }
 
 function logTimingInfo(operation: string, startTime: number) {
